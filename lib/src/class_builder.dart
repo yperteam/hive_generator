@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'package:built_value/built_value.dart' as built_value;
 import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/dart/element/type.dart';
 import 'package:hive_generator/src/builder.dart';
@@ -11,19 +12,25 @@ class ClassBuilder extends Builder {
   var setChecker = const TypeChecker.fromRuntime(Set);
   var iterableChecker = const TypeChecker.fromRuntime(Iterable);
   var uint8ListChecker = const TypeChecker.fromRuntime(Uint8List);
+  var builtChecker = const TypeChecker.fromRuntime(built_value.Built);
 
   ClassBuilder(ClassElement cls, Map<int, FieldElement> fields)
       : super(cls, fields);
 
+  String _constructorPrefix(bool isBuiltValue) {
+    return isBuiltValue ? 'return ${cls.name}((e) => e' : 'return ${cls.name}(';
+  }
+
   @override
   String buildRead() {
+    var isBuiltValue = builtChecker.isAssignableFrom(cls);
     var code = StringBuffer();
     code.writeln('''
     var numOfFields = reader.readByte();
     var fields = <int, dynamic>{
       for (var i = 0; i < numOfFields; i++) reader.readByte(): reader.read(),
     };
-    return ${cls.name}(
+    ${_constructorPrefix(isBuiltValue)}
     ''');
 
     var constructor = cls.constructors.firstWhere(
@@ -51,7 +58,7 @@ class ClassBuilder extends Builder {
       code.writeln('${_cast(param.type, 'fields[$index]')},');
     }
 
-    code.writeln(')');
+    if (!isBuiltValue) code.writeln(')');
 
     // There may still be fields to initialize that were not in the constructor
     // as initializing formals. We do so using cascades.
@@ -62,7 +69,7 @@ class ClassBuilder extends Builder {
       code.writeln('..$field = ${_cast(type, 'fields[$index]')}');
     }
 
-    code.writeln(';');
+    code.writeln(isBuiltValue ? ');' : ';');
 
     return code.toString();
   }
@@ -72,6 +79,8 @@ class ClassBuilder extends Builder {
       return '($variable as List)${_castIterable(type)}';
     } else if (mapChecker.isExactlyType(type)) {
       return '($variable as Map)${_castMap(type)}';
+    } else if (builtChecker.isAssignableFromType(type)) {
+      return '(${type.name}Builder()..replace($variable as ${type.name}))';
     } else {
       return '$variable as ${type.name}';
     }
