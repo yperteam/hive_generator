@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:built_value/built_value.dart' as built_value;
+import 'package:built_collection/built_collection.dart' as built_collection;
 import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/dart/element/type.dart';
 import 'package:hive_generator/src/builder.dart';
@@ -13,6 +14,8 @@ class ClassBuilder extends Builder {
   var iterableChecker = const TypeChecker.fromRuntime(Iterable);
   var uint8ListChecker = const TypeChecker.fromRuntime(Uint8List);
   var builtChecker = const TypeChecker.fromRuntime(built_value.Built);
+  var builtListChecker =
+      const TypeChecker.fromRuntime(built_collection.BuiltList);
 
   ClassBuilder(ClassElement cls, Map<int, FieldElement> fields)
       : super(cls, fields);
@@ -75,7 +78,7 @@ class ClassBuilder extends Builder {
   }
 
   String _cast(DartType type, String variable) {
-    if (iterableChecker.isAssignableFromType(type)) {
+    if (builtListChecker.isAssignableFromType(type)) {
       return 'ListBuilder(($variable as List)${_castIterable(type)})';
     } else if (iterableChecker.isAssignableFromType(type) &&
         !isUint8List(type)) {
@@ -145,7 +148,9 @@ class ClassBuilder extends Builder {
   }
 
   String _convertIterable(DartType type, String accessor) {
-    if (setChecker.isExactlyType(type) || iterableChecker.isExactlyType(type)) {
+    if (setChecker.isExactlyType(type) ||
+        iterableChecker.isExactlyType(type) ||
+        builtListChecker.isAssignableFromType(type)) {
       return '$accessor?.toList()';
     } else {
       return accessor;
