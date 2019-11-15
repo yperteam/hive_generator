@@ -76,7 +76,7 @@ class ClassBuilder extends Builder {
 
   String _cast(DartType type, String variable) {
     if (iterableChecker.isAssignableFromType(type) && !isUint8List(type)) {
-      return '($variable as List)${_castIterable(type)}';
+      return 'ListBuilder(($variable as List)${_castIterable(type)})';
     } else if (mapChecker.isExactlyType(type)) {
       return '($variable as Map)${_castMap(type)}';
     } else if (builtChecker.isAssignableFromType(type)) {
