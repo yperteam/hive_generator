@@ -2,19 +2,19 @@ import 'package:analyzer/dart/element/element.dart';
 import 'package:hive_generator/src/builder.dart';
 
 class EnumBuilder extends Builder {
-  EnumBuilder(ClassElement cls, List<AdapterField> getters)
-      : super(cls, getters, null);
+  EnumBuilder(ClassElement cls, Map<int, FieldElement> fields)
+      : super(cls, fields);
 
   @override
   String buildRead() {
     var code = StringBuffer();
     code.writeln('switch(reader.readByte()) {');
 
-    for (var field in getters) {
+    fields.forEach((index, field) {
       code.writeln('''
-        case ${field.index}:
+        case $index:
           return ${cls.name}.${field.name};''');
-    }
+    });
 
     code.writeln('''
       default:
@@ -29,12 +29,12 @@ class EnumBuilder extends Builder {
     var code = StringBuffer();
     code.writeln('switch(obj) {');
 
-    for (var field in getters) {
+    fields.forEach((index, field) {
       code.writeln('''
         case ${cls.name}.${field.name}:
-          writer.writeByte(${field.index});
+          writer.writeByte($index);
           break;''');
-    }
+    });
 
     code.writeln('}');
 

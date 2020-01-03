@@ -4,14 +4,10 @@ import 'package:built_value/built_value.dart' as built_value;
 import 'package:built_collection/built_collection.dart' as built_collection;
 import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/dart/element/type.dart';
-import 'package:hive/hive.dart';
 import 'package:hive_generator/src/builder.dart';
-import 'package:hive_generator/src/helper.dart';
 import 'package:source_gen/source_gen.dart';
-import 'package:dartx/dartx.dart';
 
 class ClassBuilder extends Builder {
-  var hiveListChecker = const TypeChecker.fromRuntime(HiveList);
   var listChecker = const TypeChecker.fromRuntime(List);
   var mapChecker = const TypeChecker.fromRuntime(Map);
   var setChecker = const TypeChecker.fromRuntime(Set);
@@ -21,9 +17,8 @@ class ClassBuilder extends Builder {
   var builtListChecker =
       const TypeChecker.fromRuntime(built_collection.BuiltList);
 
-  ClassBuilder(
-      ClassElement cls, List<AdapterField> getters, List<AdapterField> setters)
-      : super(cls, getters, setters);
+  ClassBuilder(ClassElement cls, Map<int, FieldElement> fields)
+      : super(cls, fields);
 
   String _constructorPrefix(bool isBuiltValue) {
     return isBuiltValue ? 'return ${cls.name}((e) => e' : 'return ${cls.name}(';
@@ -41,32 +36,40 @@ class ClassBuilder extends Builder {
     ${_constructorPrefix(isBuiltValue)}
     ''');
 
-    var constr = cls.constructors.firstOrNullWhere((it) => it.name.isEmpty);
-    check(constr != null, 'Provide an unnamed constructor.');
+    var constructor = cls.constructors.firstWhere(
+      (constructor) => constructor.name.isEmpty,
+      orElse: () => throw AssertionError('Provide an unnamed constructor.'),
+    );
 
     // The remaining fields to initialize.
-    var fields = setters.toList();
+    var remainingFields = <String, int>{
+      for (var entry in fields.entries) entry.value.name: entry.key,
+    };
 
-    var initializingParams =
-        constr.parameters.where((param) => param.isInitializingFormal);
-    for (var param in initializingParams) {
-      var field = fields.firstOrNullWhere((it) => it.name == param.name);
-      if (field != null) {
-        if (param.isNamed) {
-          code.write('${param.name}: ');
-        }
-        code.writeln('${_cast(param.type, 'fields[${field.index}]')},');
-        fields.remove(field);
+    for (var param in constructor.parameters
+        .where((param) => param.isInitializingFormal)) {
+      var index = remainingFields.remove(param.name);
+      if (index == null) {
+        // This is a parameter of the form `this.field`, but it's not present
+        // in the binary encoding.
+        continue;
       }
+
+      if (param.isNamed) {
+        code.write('${param.name}: ');
+      }
+      code.writeln('${_cast(param.type, 'fields[$index]')},');
     }
 
     if (!isBuiltValue) code.writeln(')');
 
     // There may still be fields to initialize that were not in the constructor
     // as initializing formals. We do so using cascades.
-    for (var field in fields) {
-      code.writeln(
-          '..${field.name} = ${_cast(field.type, 'fields[${field.index}]')}');
+    for (var entry in remainingFields.entries) {
+      var field = entry.key;
+      var index = entry.value;
+      var type = fields[index].type;
+      code.writeln('..$field = ${_cast(type, 'fields[$index]')}');
     }
 
     code.writeln(isBuiltValue ? ');' : ';');
@@ -77,8 +80,6 @@ class ClassBuilder extends Builder {
   String _cast(DartType type, String variable) {
     if (builtListChecker.isAssignableFromType(type)) {
       return 'ListBuilder(($variable as List)${_castIterable(type)})';
-    } else if (hiveListChecker.isExactlyType(type)) {
-      return '($variable as HiveList)?.castHiveList()';
     } else if (iterableChecker.isAssignableFromType(type) &&
         !isUint8List(type)) {
       return '($variable as List)${_castIterable(type)}';
@@ -134,13 +135,13 @@ class ClassBuilder extends Builder {
   String buildWrite() {
     var code = StringBuffer();
     code.writeln('writer');
-    code.writeln('..writeByte(${getters.length})');
-    for (var field in getters) {
+    code.writeln('..writeByte(${fields.length})');
+    fields.forEach((index, field) {
       var value = _convertIterable(field.type, 'obj.${field.name}');
       code.writeln('''
-      ..writeByte(${field.index})
+      ..writeByte($index)
       ..write($value)''');
-    }
+    });
     code.writeln(';');
 
     return code.toString();
