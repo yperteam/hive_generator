@@ -24,6 +24,8 @@ class TypeAdapterGenerator extends GeneratorForAnnotation<HiveType> {
     var setters = gettersAndSetters[1];
     verifyFieldIndices(setters);
 
+    var typeId = getTypeId(annotation);
+
     var adapterName = getAdapterName(cls.name, annotation);
     var builder = cls.isEnum
         ? EnumBuilder(cls, getters)
@@ -31,6 +33,9 @@ class TypeAdapterGenerator extends GeneratorForAnnotation<HiveType> {
 
     return '''
     class $adapterName extends TypeAdapter<${cls.name}> {
+      @override
+      int get typeId => $typeId;
+
       @override
       ${cls.name} read(BinaryReader reader) {
         ${builder.buildRead()}
@@ -124,5 +129,9 @@ class TypeAdapterGenerator extends GeneratorForAnnotation<HiveType> {
     } else {
       return annAdapterName.stringValue;
     }
+  }
+
+  int getTypeId(ConstantReader annotation) {
+    return annotation.read('typeId').intValue;
   }
 }
