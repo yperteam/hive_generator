@@ -1,5 +1,6 @@
 import 'package:analyzer/dart/element/element.dart';
 import 'package:build/build.dart';
+import 'package:hive_generator/src/builder.dart';
 import 'package:hive_generator/src/class_builder.dart';
 import 'package:hive_generator/src/enum_builder.dart';
 import 'package:hive_generator/src/helper.dart';
@@ -11,16 +12,24 @@ class TypeAdapterGenerator extends GeneratorForAnnotation<HiveType> {
   var builtChecker = const TypeChecker.fromRuntime(built_value.Built);
 
   @override
-  String generateForAnnotatedElement(
-      Element element, ConstantReader annotation, BuildStep buildStep) {
+  Future<String> generateForAnnotatedElement(
+      Element element, ConstantReader annotation, BuildStep buildStep) async {
     var cls = getClass(element);
-    var fields = getFields(cls);
+    var library = await buildStep.inputLibrary;
+    var gettersAndSetters = getAccessors(cls, library);
+
+    var getters = gettersAndSetters[0];
+    verifyFieldIndices(getters);
+
+    var setters = gettersAndSetters[1];
+    verifyFieldIndices(setters);
+
     var adapterName = getAdapterName(cls.name, annotation);
-    var builder =
-        cls.isEnum ? EnumBuilder(cls, fields) : ClassBuilder(cls, fields);
+    var builder = cls.isEnum
+        ? EnumBuilder(cls, getters)
+        : ClassBuilder(cls, getters, setters);
 
     return '''
-
     class $adapterName extends TypeAdapter<${cls.name}> {
       @override
       ${cls.name} read(BinaryReader reader) {
@@ -39,34 +48,73 @@ class TypeAdapterGenerator extends GeneratorForAnnotation<HiveType> {
     check(element.kind == ElementKind.CLASS,
         'Only classes or enums are allowed to be annotated with @HiveType.');
 
-    var cls = element as ClassElement;
-
-    return cls;
+    return element as ClassElement;
   }
 
-  Map<int, FieldElement> _getFields(ClassElement cls, bool isBuiltValue) {
-    var typeFields = <int, FieldElement>{};
-    var fieldNum = 0;
-    for (var field in cls.fields) {
-      if (isBuiltValue && field.name == 'serializer') {
-        continue;
-      } else if (!isBuiltValue) {
-        var fieldAnn = getHiveFieldAnn(field);
-        if (fieldAnn == null) continue;
-        fieldNum = fieldAnn.index;
+  Set<String> getAllAccessorNames(ClassElement cls) {
+    var accessorNames = <String>{};
+
+    var supertypes = cls.allSupertypes.map((it) => it.element);
+    for (var type in [cls, ...supertypes]) {
+      for (var accessor in type.accessors) {
+        if (accessor.isSetter) {
+          var name = accessor.name;
+          accessorNames.add(name.substring(0, name.length - 1));
+        } else {
+          accessorNames.add(accessor.name);
+        }
       }
-      check(fieldNum >= 0 || fieldNum <= 255,
-          'Field numbers can only be in the range 0-255.');
-      check(!typeFields.containsKey(fieldNum),
-          'Duplicate field number: $fieldNum.');
-      typeFields[fieldNum] = field;
-      fieldNum += 1;
     }
-    return typeFields;
+
+    return accessorNames;
   }
 
-  Map<int, FieldElement> getFields(ClassElement cls) {
-    return _getFields(cls, builtChecker.isAssignableFrom(cls));
+  List<List<AdapterField>> getAccessors(
+      ClassElement cls, LibraryElement library) {
+    var accessorNames = getAllAccessorNames(cls);
+
+    var getters = <AdapterField>[];
+    var setters = <AdapterField>[];
+    for (var name in accessorNames) {
+      var getter = cls.lookUpGetter(name, library);
+      if (getter != null) {
+        var getterAnn =
+            getHiveFieldAnn(getter.variable) ?? getHiveFieldAnn(getter);
+        if (getterAnn != null) {
+          var field = getter.variable;
+          getters.add(AdapterField(getterAnn.index, field.name, field.type));
+        }
+      }
+
+      var setter = cls.lookUpSetter('$name=', library);
+      if (setter != null) {
+        var setterAnn =
+            getHiveFieldAnn(setter.variable) ?? getHiveFieldAnn(setter);
+        if (setterAnn != null) {
+          var field = setter.variable;
+          setters.add(AdapterField(setterAnn.index, field.name, field.type));
+        }
+      }
+    }
+
+    return [getters, setters];
+  }
+
+  void verifyFieldIndices(List<AdapterField> fields) {
+    for (var field in fields) {
+      check(field.index >= 0 || field.index <= 255,
+          'Field numbers can only be in the range 0-255.');
+
+      for (var otherField in fields) {
+        if (otherField == field) continue;
+        if (otherField.index == field.index) {
+          throw HiveError(
+            'Duplicate field number: ${field.index}. Fields "${field.name}" '
+            'and "${otherField.name}" have the same number.',
+          );
+        }
+      }
+    }
   }
 
   String getAdapterName(String typeName, ConstantReader annotation) {
