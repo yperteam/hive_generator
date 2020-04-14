@@ -14,10 +14,10 @@ dependencies:
     git:
       url: git@github.com:yperteam/hive.git
   analyzer: ">=0.36.0 <0.40.0"
-  dartx: ^0.2.0
+  dartx: ^0.3.0
 
 dev_dependencies:
   test: ^1.6.4
   build_test: any
   build_runner: any
-  pedantic: '1.7.0'
+  pedantic: "1.7.0"
